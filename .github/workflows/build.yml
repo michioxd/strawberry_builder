@@ -1,0 +1,219 @@
+name: Build Release (macOS & Windows)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-public:
+    name: Build macOS Public
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ 'macos-15-intel', 'macos-15' ]
+        buildtype: [ 'release' ]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Get latest tag
+        id: get_tag
+        shell: bash
+        run: |
+          LATEST_TAG=$(curl -s https://api.github.com/repos/strawberrymusicplayer/strawberry/releases/latest | jq -r .tag_name)
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+      - name: Checkout latest tag
+        uses: actions/checkout@v4
+        with:
+          repository: strawberrymusicplayer/strawberry
+          ref: ${{ steps.get_tag.outputs.tag }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set MACOSX_DEPLOYMENT_TARGET
+        run: |
+          for i in 12 13 14 15; do
+            if [ -d "/Library/Developer/CommandLineTools/SDKs/MacOSX${i}.sdk" ]; then
+              echo "Using macOS SDK ${i}"
+              echo "MACOSX_DEPLOYMENT_TARGET=${i}.0" >> $GITHUB_ENV
+              break
+            fi
+          done
+
+      - name: Set arch and buildtype
+        shell: bash
+        run: |
+          echo "arch=$(uname -m)" >> $GITHUB_ENV
+          echo "buildtype=$(echo ${{matrix.buildtype}} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "cmake_buildtype=$(echo ${{matrix.buildtype}} | awk '{print toupper(substr($0,0,1))tolower(substr($0,2))}')" >> $GITHUB_ENV
+
+      - name: Uninstall homebrew
+        run: |
+          curl -sfLO https://raw.githubusercontent.com/Homebrew/install/master/uninstall.sh
+          chmod +x ./uninstall.sh
+          sudo ./uninstall.sh --force
+          rm -f uninstall.sh
+
+      - name: Download macOS dependencies
+        run: curl -f -O -L https://github.com/strawberrymusicplayer/strawberry-macos-dependencies/releases/latest/download/strawberry-macos-${{env.arch}}-${{env.buildtype}}.tar.xz
+
+      - name: Extract macOS dependencies
+        run: sudo tar -C / -xf strawberry-macos-${{env.arch}}-${{env.buildtype}}.tar.xz
+
+      - name: Set prefix path and update PATH
+        run: |
+          echo "prefix_path=/opt/strawberry_macos_${{env.arch}}_${{env.buildtype}}" >> $GITHUB_ENV
+          echo "/opt/strawberry_macos_${{env.arch}}_${{env.buildtype}}/bin" >> $GITHUB_PATH
+
+      - name: Configure CMake
+        env:
+          PKG_CONFIG_PATH: /opt/strawberry_macos_${{env.arch}}_${{env.buildtype}}/lib/pkgconfig
+          LDFLAGS: -L/opt/strawberry_macos_${{env.arch}}_${{env.buildtype}}/lib -Wl,-rpath,/opt/strawberry_macos_${{env.arch}}_${{env.buildtype}}/lib
+        run: |
+          cmake -E make_directory build
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE="${{env.cmake_buildtype}}" \
+            -DCMAKE_PREFIX_PATH="/opt/strawberry_macos_${{env.arch}}_${{env.buildtype}}/lib/cmake" \
+            -DBUILD_WERROR=ON -DUSE_BUNDLE=ON -DICU_ROOT="${{env.prefix_path}}" \
+            -DARCH="${{env.arch}}" -DENABLE_SPARKLE=ON -DENABLE_QTSPARKLE=OFF \
+            -DENABLE_SPOTIFY=$(test -f "/opt/strawberry_macos_${{env.arch}}_${{env.buildtype}}/lib/gstreamer-1.0/libgstspotify.dylib" && echo "ON" || echo "OFF")
+
+      - name: Build and Install
+        run: |
+          cmake --build build --config Release --parallel 4
+          cd build && make install
+
+      - name: Deploy
+        env:
+          GIO_EXTRA_MODULES: ${{env.prefix_path}}/lib/gio/modules
+          GST_PLUGIN_SCANNER: ${{env.prefix_path}}/libexec/gstreamer-1.0/gst-plugin-scanner
+          GST_PLUGIN_PATH: ${{env.prefix_path}}/lib/gstreamer-1.0
+          LIBSOUP_LIBRARY_PATH: ${{env.prefix_path}}/lib/libsoup-3.0.0.dylib
+        working-directory: build
+        run: make deploy && make deploycheck
+
+      - name: Create DMG
+        working-directory: build
+        run: make dmg
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.runner }}-${{ matrix.buildtype }}
+          path: build/*.dmg
+          retention-days: 1
+
+
+  build-windows-mingw:
+    name: Build Windows MinGW
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [ 'x86_64' ]
+        buildtype: [ 'release' ]
+    runs-on: ubuntu-latest
+    container:
+      image: jonaski/strawberry-mxe-${{matrix.arch}}-${{matrix.buildtype}}
+    steps:
+      - name: Get latest tag
+        id: get_tag
+        shell: bash
+        run: |
+          LATEST_TAG=$(curl -s https://api.github.com/repos/strawberrymusicplayer/strawberry/releases/latest | jq -r .tag_name)
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+      - name: Checkout latest tag
+        uses: actions/checkout@v4
+        with:
+          repository: strawberrymusicplayer/strawberry
+          ref: ${{ steps.get_tag.outputs.tag }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup build environment
+        shell: bash
+        run: |
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
+          echo "cmake_buildtype=$(echo ${{matrix.buildtype}} | sed 's/.*/\u&/')" >> $GITHUB_ENV
+          ln -s /strawberry-mxe ~/mxe-shared
+          cmake -E make_directory build
+
+      - name: Configure and Build
+        env:
+          PKG_CONFIG_PATH: /strawberry-mxe/usr/${{matrix.arch}}-w64-mingw32.shared/lib/pkgconfig
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_TOOLCHAIN_FILE="../cmake/Toolchain-${{matrix.arch}}-w64-mingw32-shared.cmake" \
+            -DCMAKE_BUILD_TYPE="${{env.cmake_buildtype}}" \
+            -DCMAKE_PREFIX_PATH="/strawberry-mxe/usr/${{matrix.arch}}-w64-mingw32.shared/qt6" \
+            -DBUILD_WERROR=ON -DARCH="${{matrix.arch}}" -DENABLE_WIN32_CONSOLE=OFF \
+            -DENABLE_GIO=OFF -DENABLE_AUDIOCD=OFF -DENABLE_MTP=OFF -DENABLE_GPOD=OFF -DENABLE_SPOTIFY=OFF
+          cmake --build build --config "${{env.cmake_buildtype}}" --parallel $(nproc)
+
+      - name: Prepare installer files
+        working-directory: build
+        run: |
+          mkdir -p gio-modules platforms sqldrivers tls imageformats styles gstreamer-plugins nsisplugins
+          cp /strawberry-mxe/usr/${{matrix.arch}}-w64-mingw32.shared/lib/gio/modules/{libgiognutls.dll,libgioopenssl.dll} gio-modules/
+          cp /strawberry-mxe/usr/${{matrix.arch}}-w64-mingw32.shared/qt6/plugins/platforms/qwindows.dll platforms/
+          cp /strawberry-mxe/usr/${{matrix.arch}}-w64-mingw32.shared/qt6/plugins/styles/qmodernwindowsstyle.dll styles/
+          cp /strawberry-mxe/usr/${{matrix.arch}}-w64-mingw32.shared/qt6/plugins/tls/{qschannelbackend.dll,qopensslbackend.dll} tls/
+          cp /strawberry-mxe/usr/${{matrix.arch}}-w64-mingw32.shared/qt6/plugins/sqldrivers/qsqlite.dll sqldrivers/
+          cp /strawberry-mxe/usr/${{matrix.arch}}-w64-mingw32.shared/qt6/plugins/imageformats/{qgif.dll,qico.dll,qjpeg.dll,qtiff.dll,qjp2.dll,qwebp.dll} imageformats/
+          cp /strawberry-mxe/usr/${{matrix.arch}}-w64-mingw32.shared/bin/gstreamer-1.0/*.dll gstreamer-plugins/
+          cp /strawberry-mxe/usr/${{matrix.arch}}-w64-mingw32.shared/bin/{sqlite3.exe,gst-launch-1.0.exe,gst-play-1.0.exe,gst-discoverer-1.0.exe,libsoup-3.0-0.dll,libnghttp2.dll} .
+          /strawberry-mxe/tools/copydlldeps.sh -c -d . -F . -F ./platforms -F ./styles -F ./imageformats -F ./tls -F ./sqldrivers -F ./gstreamer-plugins -R /strawberry-mxe/usr/${{matrix.arch}}-w64-mingw32.shared
+          find . -type f \( -iname \*.dll -o -iname \*.exe \) -exec /strawberry-mxe/usr/bin/${{matrix.arch}}-w64-mingw32.shared-strip {} \;
+          cp ../dist/windows/*.nsh ../dist/windows/*.ico ../COPYING .
+
+      - name: Build Windows installer
+        working-directory: build
+        run: makensis strawberry.nsi
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-mingw-${{ matrix.arch }}-${{ matrix.buildtype }}
+          path: build/StrawberrySetup*.exe
+          retention-days: 1
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-macos-public, build-windows-mingw]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get latest tag
+        id: get_tag
+        run: |
+          LATEST_TAG=$(curl -s https://api.github.com/repos/strawberrymusicplayer/strawberry/releases/latest | jq -r .tag_name)
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate MD5 and Release Notes
+        run: |
+          echo "## Strawberry Music Player - v${{ steps.get_tag.outputs.tag }}" > release_notes.md
+          echo "From \`${{ steps.get_tag.outputs.tag }}\`." >> release_notes.md
+          echo "" >> release_notes.md
+          echo "### Checksum (MD5)" >> release_notes.md
+          echo "\`\`\`text" >> release_notes.md
+          cd artifacts
+          for file in *; do
+            if [ -f "$file" ]; then
+              md5sum "$file" >> ../release_notes.md
+            fi
+          done
+          echo "\`\`\`" >> ../release_notes.md
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_tag.outputs.tag }}-build
+          name: Strawberry ${{ steps.get_tag.outputs.tag }} (Auto-build)
+          body_path: release_notes.md
+          files: artifacts/*
