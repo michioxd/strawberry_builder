@@ -30,7 +30,8 @@ jobs:
             echo "Failed to determine latest Strawberry release tag from $API_URL" >&2
             exit 1
           fi
-
+          
+          echo "Latest tag: $LATEST_TAG"
           echo "tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
 
   build-macos-public:
