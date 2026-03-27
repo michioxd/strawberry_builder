@@ -183,6 +183,11 @@ jobs:
           find . -type f \( -iname \*.dll -o -iname \*.exe \) -exec /strawberry-mxe/usr/bin/${{matrix.arch}}-w64-mingw32.shared-strip {} \;
           cp ../dist/windows/*.nsh ../dist/windows/*.ico ../COPYING .
 
+      - name: Patch NSIS script for libhogweed version
+        working-directory: build
+        run: |
+          sed -i 's/libhogweed-6\.dll/libhogweed-7.dll/g' strawberry.nsi
+
       - name: Build Windows installer
         working-directory: build
         run: makensis strawberry.nsi
