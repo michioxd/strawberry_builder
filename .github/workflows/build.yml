@@ -245,7 +245,7 @@ jobs:
         run: |
           if [ "${{ needs.resolve-source.outputs.build_mode }}" = "master" ]; then
             echo "## Strawberry Music Player - ${{ needs.resolve-source.outputs.version }}" > release_notes.md
-            echo "From \`master\` at commit \`${{ needs.resolve-source.outputs.version }}\`." >> release_notes.md
+            echo "From [\`master\`](https://github.com/strawberrymusicplayer/strawberry/tree/master) at commit [\`${{ needs.resolve-source.outputs.version }}\`](https://github.com/strawberrymusicplayer/strawberry/commit/${{ needs.resolve-source.outputs.version }})." >> release_notes.md
           else
             echo "## Strawberry Music Player - v${{ needs.resolve-source.outputs.version }}" > release_notes.md
             echo "From release tag \`${{ needs.resolve-source.outputs.version }}\`." >> release_notes.md
