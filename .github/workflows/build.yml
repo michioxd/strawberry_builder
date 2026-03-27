@@ -7,8 +7,35 @@ permissions:
   contents: write
 
 jobs:
+  resolve-tag:
+    name: Resolve Upstream Tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.get_tag.outputs.tag }}
+    steps:
+      - name: Get latest tag
+        id: get_tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          API_URL="https://api.github.com/repos/strawberrymusicplayer/strawberry/releases/latest"
+          LATEST_TAG=$(curl -fsSL \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$API_URL" | jq -r '.tag_name // empty')
+
+          if [ -z "$LATEST_TAG" ]; then
+            echo "Failed to determine latest Strawberry release tag from $API_URL" >&2
+            exit 1
+          fi
+
+          echo "tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+
   build-macos-public:
     name: Build macOS Public
+    needs: resolve-tag
     strategy:
       fail-fast: false
       matrix:
@@ -16,18 +43,11 @@ jobs:
         buildtype: [ 'release' ]
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Get latest tag
-        id: get_tag
-        shell: bash
-        run: |
-          LATEST_TAG=$(curl -s https://api.github.com/repos/strawberrymusicplayer/strawberry/releases/latest | jq -r .tag_name)
-          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
-
       - name: Checkout latest tag
         uses: actions/checkout@v4
         with:
           repository: strawberrymusicplayer/strawberry
-          ref: ${{ steps.get_tag.outputs.tag }}
+          ref: ${{ needs.resolve-tag.outputs.tag }}
           fetch-depth: 0
           submodules: recursive
 
@@ -107,6 +127,7 @@ jobs:
 
   build-windows-mingw:
     name: Build Windows MinGW
+    needs: resolve-tag
     strategy:
       fail-fast: false
       matrix:
@@ -116,18 +137,11 @@ jobs:
     container:
       image: jonaski/strawberry-mxe-${{matrix.arch}}-${{matrix.buildtype}}
     steps:
-      - name: Get latest tag
-        id: get_tag
-        shell: bash
-        run: |
-          LATEST_TAG=$(curl -s https://api.github.com/repos/strawberrymusicplayer/strawberry/releases/latest | jq -r .tag_name)
-          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
-
       - name: Checkout latest tag
         uses: actions/checkout@v4
         with:
           repository: strawberrymusicplayer/strawberry
-          ref: ${{ steps.get_tag.outputs.tag }}
+          ref: ${{ needs.resolve-tag.outputs.tag }}
           fetch-depth: 0
           submodules: recursive
 
@@ -180,15 +194,9 @@ jobs:
 
   create-release:
     name: Create GitHub Release
-    needs: [build-macos-public, build-windows-mingw]
+    needs: [resolve-tag, build-macos-public, build-windows-mingw]
     runs-on: ubuntu-latest
     steps:
-      - name: Get latest tag
-        id: get_tag
-        run: |
-          LATEST_TAG=$(curl -s https://api.github.com/repos/strawberrymusicplayer/strawberry/releases/latest | jq -r .tag_name)
-          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -197,8 +205,8 @@ jobs:
 
       - name: Generate MD5 and Release Notes
         run: |
-          echo "## Strawberry Music Player - v${{ steps.get_tag.outputs.tag }}" > release_notes.md
-          echo "From \`${{ steps.get_tag.outputs.tag }}\`." >> release_notes.md
+          echo "## Strawberry Music Player - v${{ needs.resolve-tag.outputs.tag }}" > release_notes.md
+          echo "From \`${{ needs.resolve-tag.outputs.tag }}\`." >> release_notes.md
           echo "" >> release_notes.md
           echo "### Checksum (MD5)" >> release_notes.md
           echo "\`\`\`text" >> release_notes.md
@@ -213,7 +221,7 @@ jobs:
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.get_tag.outputs.tag }}-build
-          name: Strawberry ${{ steps.get_tag.outputs.tag }} (Auto-build)
+          tag_name: ${{ needs.resolve-tag.outputs.tag }}-build
+          name: Strawberry ${{ needs.resolve-tag.outputs.tag }} (Auto-build)
           body_path: release_notes.md
           files: artifacts/*
