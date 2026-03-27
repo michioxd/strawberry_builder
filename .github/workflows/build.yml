@@ -178,7 +178,7 @@ jobs:
           cp /strawberry-mxe/usr/${{matrix.arch}}-w64-mingw32.shared/qt6/plugins/sqldrivers/qsqlite.dll sqldrivers/
           cp /strawberry-mxe/usr/${{matrix.arch}}-w64-mingw32.shared/qt6/plugins/imageformats/{qgif.dll,qico.dll,qjpeg.dll,qtiff.dll,qjp2.dll,qwebp.dll} imageformats/
           cp /strawberry-mxe/usr/${{matrix.arch}}-w64-mingw32.shared/bin/gstreamer-1.0/*.dll gstreamer-plugins/
-          cp /strawberry-mxe/usr/${{matrix.arch}}-w64-mingw32.shared/bin/{sqlite3.exe,gst-launch-1.0.exe,gst-play-1.0.exe,gst-discoverer-1.0.exe,libsoup-3.0-0.dll,libnghttp2.dll} .
+          cp /strawberry-mxe/usr/${{matrix.arch}}-w64-mingw32.shared/bin/{sqlite3.exe,gst-launch-1.0.exe,gst-play-1.0.exe,gst-discoverer-1.0.exe,libsoup-3.0-0.dll,libnghttp2.dll,libhogweed-*.dll,libnettle-*.dll} .
           /strawberry-mxe/tools/copydlldeps.sh -c -d . -F . -F ./platforms -F ./styles -F ./imageformats -F ./tls -F ./sqldrivers -F ./gstreamer-plugins -R /strawberry-mxe/usr/${{matrix.arch}}-w64-mingw32.shared
           find . -type f \( -iname \*.dll -o -iname \*.exe \) -exec /strawberry-mxe/usr/bin/${{matrix.arch}}-w64-mingw32.shared-strip {} \;
           cp ../dist/windows/*.nsh ../dist/windows/*.ico ../COPYING .
