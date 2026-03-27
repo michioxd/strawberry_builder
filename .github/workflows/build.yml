@@ -98,6 +98,7 @@ jobs:
             -DCMAKE_PREFIX_PATH="/opt/strawberry_macos_${{env.arch}}_${{env.buildtype}}/lib/cmake" \
             -DBUILD_WERROR=ON -DUSE_BUNDLE=ON -DICU_ROOT="${{env.prefix_path}}" \
             -DARCH="${{env.arch}}" -DENABLE_SPARKLE=ON -DENABLE_QTSPARKLE=OFF \
+            -DENABLE_DISCORD_RPC=OFF \
             -DENABLE_SPOTIFY=$(test -f "/opt/strawberry_macos_${{env.arch}}_${{env.buildtype}}/lib/gstreamer-1.0/libgstspotify.dylib" && echo "ON" || echo "OFF")
 
       - name: Build and Install
